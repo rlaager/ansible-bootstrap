@@ -4,6 +4,10 @@ bootstrapping role & playbook.
 
 The role assumes the following in `ansible.cfg`:
 ```
+[defaults]
+roles_path = roles
+remote_user = ansible
+
 [privilege_escalation]
 become=True
 become_user=root
@@ -14,9 +18,10 @@ It is designed to support SSH pipelining:
 [ssh_connection]
 pipelining = True
 ```
-
 This requires a dance of using paramiko for the first task to get rid of
 `requiretty` from the sudo configuration.
+
+It also supports Mitogen.
 
 You will need two public keys in `roles/bootstrap/files/` named
 `ansible.rsa.key.pub` and `ansible.ed25519.key.pub`.  It sets them both
