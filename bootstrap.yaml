@@ -1,0 +1,10 @@
+- hosts: "{{ target }}"
+  gather_facts: no
+  vars_prompt:
+  - name: target
+    prompt: "Enter node server(s) (separate by ',')"
+    private: no
+    when: not target
+
+  roles:
+    - bootstrap

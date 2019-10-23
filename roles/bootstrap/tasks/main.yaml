@@ -1,0 +1,78 @@
+# This must be the first task for bootstrapping!
+# 
+# If requiretty is set on the remote host, the bootstrapping itself will
+# fail because of pipelining.  Instead, we force the use of paramiko, which
+# does not do pipelining.  Alternatively, we could remove the paramiko
+# connection specification, but then users would have to run:
+#   ANSIBLE_SSH_PIPELINING=0 ansible-playbook playbooks/bootstrap.yaml ...
+- name: remove requiretty from sudoers
+  connection: paramiko
+  lineinfile:
+    path: /etc/sudoers
+    state: absent
+    regexp: ^\s*Defaults\s+requiretty$
+    validate: /usr/sbin/visudo -cf %s
+  when: ansible_connection != "local"
+
+- name: explicitly gather facts
+  setup:
+
+- name: install SELinux dependencies
+  yum:
+    name: "{{ bootstrap_packages }}"
+    state: present
+  vars:
+    bootstrap_packages:
+      - libselinux-python
+      - policycoreutils-python
+  when: ansible_facts["os_family"] == "RedHat"
+
+# NOTE: It seems weird to run this so late, since other things have assumed
+# NOTE: that sudo exists.  However, if this matters (i.e. sudo is not
+# NOTE: installed), then the user MUST specify a become_method on the command
+# NOTE: line for this role to work at all, so it doesn't really matter when
+# NOTE: this particular task is run.
+- name: install sudo
+  apt:
+    name: sudo
+    state: present
+    cache_valid_time: 3600
+    force_apt_get: yes
+  when: ansible_facts["os_family"] == "Debian"
+
+- name: allow ansible user to have passwordless sudo
+  lineinfile:
+    path: /etc/sudoers.d/ansible
+    line: "ansible ALL=(ALL) NOPASSWD: ALL"
+    # Older systems require this to be 0440 or sudo breaks.
+    mode: 0440
+    create: yes
+    validate: /usr/sbin/visudo -cf %s
+
+- name: add ansible user and set groups
+  user:
+    name: ansible
+    # On RedHat systems, we put the ansible user in the wheel group to
+    # work-around cPanel's open file limit of 100.  Mitogen uses file
+    # descriptors 100 and 101 for internal purposes.  See:
+    # https://github.com/dw/mitogen/issues/644
+    groups:
+      "{{ 'wheel' if ansible_facts['os_family'] == 'RedHat' else '' }}"
+    home: "/home/ansible"
+
+- name: create ansible's authorized_keys
+  become: yes
+  become_user: "{{ 'root' if ansible_check_mode else 'ansible' }}"
+  authorized_key:
+    user: ansible
+    path: "/home/ansible/.ssh/authorized_keys"
+    key: |
+      {{ lookup('file', 'ansible.ed25519.key.pub') }}
+      {{ lookup('file', 'ansible.rsa.key.pub') }}
+    exclusive: yes
+
+# This must be after setting up passwordless sudo and the authorized_keys.
+- name: remove ansible's password
+  user:
+    name: ansible
+    password: "*"
